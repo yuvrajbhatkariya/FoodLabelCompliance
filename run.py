@@ -1,39 +1,36 @@
 import os
 import mimetypes
 import json
+
 from app.quality import check_image
 from app.extractor import extract
 from app.merge import merge
 from app.db import save_scan
+from app.evaluator import evaluate
+from app.report import render
 
-# =====================================================================
-# 1. SET YOUR IMAGE PATHS HERE
-# =====================================================================
-t1 = "test_images/t1/front.jpeg"   # Front view
-t2 = "test_images/t1/side2.jpeg"   # Back view
-t3 = "test_images/t1/side1.jpeg"   # Side view (leave empty "" if not available)
-t4 = "test_images/t1/side3.jpeg"                      # Base / top view (leave empty "" if not available)
 
-ALL_SIDES_CONFIRMED = True   # Set False if some sides are missing
-# =====================================================================
+t1 = "test_images/t1/front.jpeg"
+t2 = "test_images/t1/side2.jpeg"
+t3 = "test_images/t1/side1.jpeg"
+t4 = "test_images/t1/side3.jpeg"
+
+ALL_SIDES_CONFIRMED = True
 
 
 def run_pipeline():
-    # Map slots to view labels
     image_slots = [
         (t1, "front"),
         (t2, "back"),
         (t3, "side"),
-        (t4, "base")
+        (t4, "base"),
     ]
 
-    blobs = []
-    problems = []
+    blobs, problems = [], []
 
     print("--- STEP 1: LOADING & CHECKING IMAGES ---")
-    active_index = 0
-    for path, default_label in image_slots:
-        path = path.strip() if path else ""
+
+    for path, label in image_slots:
         if not path:
             continue
 
@@ -44,56 +41,71 @@ def run_pipeline():
         with open(path, "rb") as f:
             data = f.read()
 
-        # Quality Gate Check (Laplacian sharpness & resolution)
-        q = check_image(data)
-        if not q["ok"]:
-            problems.append({"file": path, "reasons": q["reasons"]})
+        quality = check_image(data)
+
+        if not quality["ok"]:
+            problems.append({
+                "file": path,
+                "reasons": quality["reasons"],
+            })
         else:
-            print(f"  ✓ [{default_label}] {path} passed quality checks.")
+            print(f"✓ [{label}] quality passed")
 
         mime, _ = mimetypes.guess_type(path)
-        blobs.append((data, mime or "image/jpeg", default_label))
-        active_index += 1
+        blobs.append((data, mime or "image/jpeg", label))
 
     if not blobs:
-        print("❌ No valid images provided in t1, t2, t3, or t4.")
+        print("❌ No images provided.")
         return
 
     if problems:
-        print("\n❌ Quality Gate Failed! Retake needed:")
-        for prob in problems:
-            print(f"   - {prob['file']}: {', '.join(prob['reasons'])}")
+        print("\n❌ Quality Gate Failed:")
+        for problem in problems:
+            print(
+                f" - {problem['file']}: "
+                f"{', '.join(problem['reasons'])}"
+            )
         return
 
     print(f"\n--- STEP 2: SENDING {len(blobs)} IMAGES TO GEMINI ---")
+
     try:
         extraction = extract(blobs)
-        print("  ✓ Extraction completed successfully.")
+        print("✓ Extraction completed")
     except Exception as e:
         print(f"❌ Extraction failed: {e}")
         return
 
-    print("\n--- STEP 3: MERGING EXTRACTED FIELDS ---")
-    merged = merge(extraction, all_sides_confirmed=ALL_SIDES_CONFIRMED)
-    print("  ✓ Merge completed.")
+    print("\n--- STEP 3: MERGING ---")
+    merged = merge(
+        extraction,
+        all_sides_confirmed=ALL_SIDES_CONFIRMED,
+    )
 
-    print("\n--- STEP 4: SAVING TO DATABASE ---")
+    print("\n--- STEP 4: EVALUATING ---")
+    findings = evaluate(merged)
+
+    print("\n--- STEP 5: SAVING ---")
     try:
-        scan_id = save_scan(blobs, extraction, merged, ALL_SIDES_CONFIRMED)
-        print(f"  ✓ Saved to database with scan_id: {scan_id}")
+        scan_id = save_scan(
+            blobs,
+            extraction,
+            merged,
+            ALL_SIDES_CONFIRMED,
+        )
+        print(f"✓ scan_id: {scan_id}")
     except Exception as e:
         print(f"❌ Database save failed: {e}")
         return
 
-    print("\n" + "=" * 50)
-    print("FINAL MERGED DATA (Sample Fields):")
-    print("=" * 50)
-    for field in ["product_name", "brand_name", "mrp", "net_quantity", "fssai_license_no", "veg_nonveg_symbol"]:
-        val_info = merged.get(field, {})
-        print(f"  {field.ljust(22)}: {val_info.get('value')} (status: {val_info.get('status')})")
+    print("\n" + render(
+        merged.get("product_name", {}).get("value"),
+        merged.get("brand_name", {}).get("value"),
+        findings,
+    ))
 
-    print("\nFull JSON output:")
-    print(json.dumps(merged, indent=2))
+    print("\n--- MERGED JSON ---")
+    print(json.dumps(merged, indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":
