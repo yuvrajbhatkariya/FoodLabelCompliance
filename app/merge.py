@@ -1,6 +1,8 @@
 import re
+
 from .config import CONF_REVIEW
 from .schema import SCALAR_FIELDS
+
 
 LONG_TEXT = {
     "ingredients_text",
@@ -12,13 +14,37 @@ LONG_TEXT = {
     "instructions_for_use",
 }
 
+VARIANT_FIELDS = {"product_name", "brand_name"}
+
 
 def _script(s):
-    return "devanagari" if any("\u0900" <= ch <= "\u097F" for ch in s) else "latin"
+    return "devanagari" if any("\u0900" <= c <= "\u097F" for c in s) else "latin"
 
 
 def _norm(v):
     return re.sub(r"[^a-z0-9]", "", v.lower())
+
+
+def _is_superset_variant(a, b):
+    na, nb = _norm(a), _norm(b)
+    return bool(na and nb) and (na in nb or nb in na)
+
+
+def _has_conflict(obs):
+    by_script = {}
+
+    for _, item in obs:
+        by_script.setdefault(_script(item.value), []).append(item.value)
+
+    for values in by_script.values():
+        if len(values) > 1 and not all(
+            any(_is_superset_variant(a, b) for b in values if a != b)
+            for a in values
+        ):
+            if len({_norm(v) for v in values}) > 1:
+                return True
+
+    return False
 
 
 def merge(extraction, all_sides_confirmed=False):
@@ -39,27 +65,28 @@ def merge(extraction, all_sides_confirmed=False):
 
         if field in LONG_TEXT:
             image_index, best = max(
-                obs, key=lambda x: (len(x[1].value), x[1].confidence)
+                obs,
+                key=lambda x: (len(x[1].value), x[1].confidence),
             )
             conflict = False
-            multilingual = False
+
         else:
-            image_index, best = max(obs, key=lambda x: x[1].confidence)
-
-            scripts = {_script(o.value) for _, o in obs}
-            multilingual = len(scripts) > 1
-
-            # Only compare values written in the same script.
-            same_script = {}
-            for image_index_, observation in obs:
-                same_script.setdefault(
-                    _script(observation.value), []
-                ).append(observation)
-
-            conflict = any(
-                len({_norm(o.value) for o in values}) > 1
-                for values in same_script.values()
+            conflict = (
+                _has_conflict(obs)
+                if field in VARIANT_FIELDS
+                else len({_norm(o.value) for _, o in obs}) > 1
             )
+
+            if field in VARIANT_FIELDS and not conflict:
+                image_index, best = max(
+                    obs,
+                    key=lambda x: (len(x[1].value), x[1].confidence),
+                )
+            else:
+                image_index, best = max(
+                    obs,
+                    key=lambda x: x[1].confidence,
+                )
 
         status = (
             "conflict"
@@ -75,7 +102,6 @@ def merge(extraction, all_sides_confirmed=False):
             "confidence": best.confidence,
             "image_index": image_index,
             "box_2d": best.box_2d,
-            "multilingual": multilingual,
             "candidates": (
                 [{"image_index": i, "value": o.value} for i, o in obs]
                 if conflict else None

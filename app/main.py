@@ -4,9 +4,14 @@ from starlette.concurrency import run_in_threadpool
 from .quality import check_image
 from .extractor import extract
 from .merge import merge
-from .db import save_scan
-from .evaluator import evaluate
+from .db import (
+    save_scan,
+    save_findings,
+    load_applicable_rules,
+)
+from .evaluator import evaluate_from_db
 from .report import render, overall_status
+
 
 app = FastAPI(title="Label Compliance Checker")
 
@@ -44,11 +49,9 @@ async def scan(
 
     extraction = await run_in_threadpool(extract, blobs)
     merged = merge(extraction, all_sides_confirmed)
-    findings = evaluate(merged)
 
-    product = merged.get("product_name", {}).get("value")
-    brand = merged.get("brand_name", {}).get("value")
-    overall = overall_status(findings)
+    rules = await run_in_threadpool(load_applicable_rules)
+    findings = evaluate_from_db(merged, rules)
 
     scan_id = await run_in_threadpool(
         save_scan,
@@ -58,10 +61,24 @@ async def scan(
         all_sides_confirmed,
     )
 
+    product_id, overall = await run_in_threadpool(
+        save_findings,
+        scan_id,
+        merged,
+        findings,
+    )
+
+    product = merged.get("product_name", {}).get("value")
+    brand = merged.get("brand_name", {}).get("value")
+
     return {
         "scan_id": scan_id,
         "overall_status": overall,
         "merged": merged,
         "findings": findings,
-        "report": render(product, brand, findings),
+        "report": render(
+            merged.get("product_name", {}).get("value"),
+            merged.get("brand_name", {}).get("value"),
+            findings,
+        ),
     }
