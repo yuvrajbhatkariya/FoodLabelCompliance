@@ -9,4 +9,4 @@ UPLOAD_DIR     = os.getenv("UPLOAD_DIR", "uploads")
 
 MIN_SIDE_PX   = 1000    # reject tiny images
 MIN_SHARPNESS = 100.0   # Laplacian variance; tune on your own photos
-CONF_REVIEW   = 0.50    # below this a field is "low_conf" and goes to REVIEW
+CONF_REVIEW   = 0.75    # below this a field is "low_conf" and goes to REVIEW

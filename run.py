@@ -10,15 +10,16 @@ from app.evaluator import evaluate_from_db
 from app.report import render
 
 
-# t1 = "test_images/t1/front.jpeg"
-# t2 = "test_images/t1/side2.jpeg"
-# t3 = "test_images/t1/side1.jpeg"
-# t4 = "test_images/t1/side3.jpeg"
+t1 = "test_images/t1/front.jpeg"
+t2 = "test_images/t1/side2.jpeg"
+t3 = "test_images/t1/side1.jpeg"
+t4 = "test_images/t1/side3.jpeg"
 
-t1 = "test_images/t2/front.jpeg"
-t2 = "test_images/t2/back.jpeg"
-t3 = "test_images/t2/side1.jpeg"
-t4 = "test_images/t2/side2.jpeg"
+
+# t1 = "test_images/t2/front.jpeg"
+# t2 = "test_images/t2/back.jpeg"
+# t3 = "test_images/t2/side1.jpeg"
+# t4 = "test_images/t2/side2.jpeg"
 
 ALL_SIDES_CONFIRMED = True
 
@@ -72,7 +73,7 @@ def run_pipeline():
             )
         return
 
-    print(f"\n--- STEP 2: SENDING {len(blobs)} IMAGES TO GEMINI ---")
+    print(f"\n--- STEP 2: SENDING {len(blobs)} IMAGES TO LLM ---")
 
     try:
         extraction = extract(blobs)
